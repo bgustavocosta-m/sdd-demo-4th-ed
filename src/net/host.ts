@@ -2,6 +2,7 @@ import type { DataConnection } from 'peerjs'
 import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
 import { isEmoji, validateName } from '../profile/profile'
 import { generateRoomId, toPeerId } from '../room/roomId'
+import { startHeartbeat } from './heartbeat'
 import { createPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
 
@@ -43,6 +44,8 @@ export type HostOptions = {
   onOpen: (roomId: string) => void
   /** A guest said hello, or the game changed. */
   onState: (state: GameState) => void
+  /** The guest left after joining: the room is over (no return to waiting). */
+  onLeft: () => void
 }
 
 export type HostSession = {
@@ -52,12 +55,15 @@ export type HostSession = {
 }
 
 /** Host-authoritative: owns the `GameState`, applies both players' moves, sends full snapshots. */
-export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession {
+export function hostRoom({ player, onOpen, onState, onLeft }: HostOptions): HostSession {
   const roomId = generateRoomId()
   const peer = createPeer(toPeerId(roomId))
   let destroyed = false
   let opponent: DataConnection | null = null
+  let stopHeartbeat = () => {}
   let started = false
+  /** The guest left mid-game; nobody else gets in. */
+  let ended = false
   let state = newGame({ X: player, O: { name: 'Guest', emoji: '' } }, 'X')
 
   const publish = (next: GameState) => {
@@ -71,24 +77,28 @@ export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession 
 
   peer.on('connection', (conn) => {
     conn.on('open', () => {
-      if (opponent) {
+      if (opponent || ended) {
         conn.close() // A third visitor. "Room full" comes in #13.
         return
       }
       opponent = conn
+      stopHeartbeat = startHeartbeat(conn, () => {
+        opponent = null
+        conn.close()
+        if (destroyed) return
+        // A guest who leaves before saying hello frees the room for the next one.
+        if (!started) return
+        ended = true
+        onLeft()
+      })
     })
     conn.on('data', (raw) => {
-      if (conn !== opponent || !isMessage(raw)) return
+      if (conn !== opponent || !isMessage(raw) || raw.type === 'ping') return
       if (!started && raw.type !== 'hello') return
       if (raw.type === 'hello') started = true
       const step = handleGuestMessage(state, raw)
       if (step.send) conn.send(step.send)
       publish(step.state)
-    })
-    conn.on('close', () => {
-      // A guest who leaves before saying hello frees the room for the next one.
-      // Leaving mid-game ("Opponent left") comes in #12.
-      if (conn === opponent && !started) opponent = null
     })
   })
 
@@ -111,6 +121,7 @@ export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession 
     },
     destroy() {
       destroyed = true
+      stopHeartbeat()
       peer.destroy()
     },
   }
