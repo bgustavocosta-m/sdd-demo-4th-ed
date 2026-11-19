@@ -19,7 +19,7 @@ export default function Room(props: Props) {
   const [player, setPlayer] = useState<Player | null>(null)
   const [roomId, setRoomId] = useState<string | null>(props.role === 'guest' ? props.roomId : null)
   const [state, setState] = useState<GameState | null>(null)
-  const moveRef = useRef<((cell: number) => void) | null>(null)
+  const sessionRef = useRef<{ move: (cell: number) => void; rematch: () => void } | null>(null)
 
   const onOpenRef = useRef(props.role === 'host' ? props.onOpen : undefined)
   useEffect(() => {
@@ -41,13 +41,13 @@ export default function Room(props: Props) {
               },
               onState: setState,
             })
-            return { move: s.makeMove, destroy: s.destroy }
+            return { move: s.makeMove, rematch: s.rematch, destroy: s.destroy }
           })()
         : joinRoom({ roomId: guestRoomId, player, onState: setState })
-    moveRef.current = session.move
+    sessionRef.current = session
     return () => {
       session.destroy()
-      moveRef.current = null
+      sessionRef.current = null
       setState(null)
     }
   }, [player, guestRoomId])
@@ -58,7 +58,8 @@ export default function Room(props: Props) {
         <Board
           state={state}
           me={props.role === 'host' ? 'X' : 'O'}
-          onMove={(cell) => moveRef.current?.(cell)}
+          onMove={(cell) => sessionRef.current?.move(cell)}
+          onRematch={() => sessionRef.current?.rematch()}
         />
       </main>
     )

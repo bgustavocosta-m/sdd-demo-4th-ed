@@ -1,5 +1,5 @@
 import type { DataConnection } from 'peerjs'
-import { applyMove, newGame, type GameState, type Player } from '../game/ticTacToe'
+import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
 import { isEmoji, validateName } from '../profile/profile'
 import { generateRoomId, toPeerId } from '../room/roomId'
 import { createPeer } from './peerConfig'
@@ -14,7 +14,10 @@ const guestPlayer = (name: string, emoji: string): Player => ({
   emoji: isEmoji(emoji) ? emoji : '',
 })
 
-/** Pure host-side rules: the guest is always O; invalid moves are ignored and the state re-sent. */
+/**
+ * Pure host-side rules: the guest is always O; invalid moves are ignored and the state re-sent.
+ * A rematch before game over is ignored.
+ */
 export function handleGuestMessage(state: GameState, msg: Message): HostStep {
   switch (msg.type) {
     case 'hello': {
@@ -24,6 +27,10 @@ export function handleGuestMessage(state: GameState, msg: Message): HostStep {
     case 'move': {
       const next = applyMove(state, 'O', msg.cell) ?? state
       return { state: next, send: { type: 'state', state: next } }
+    }
+    case 'rematch': {
+      const next = rematch(state)
+      return next ? { state: next, send: { type: 'state', state: next } } : { state, send: null }
     }
     default:
       return { state, send: null }
@@ -40,6 +47,7 @@ export type HostOptions = {
 
 export type HostSession = {
   makeMove: (cell: number) => void
+  rematch: () => void
   destroy: () => void
 }
 
@@ -90,6 +98,13 @@ export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession 
     makeMove(cell) {
       if (!started || !opponent) return
       const next = applyMove(state, 'X', cell)
+      if (!next) return
+      opponent.send({ type: 'state', state: next } satisfies Message)
+      publish(next)
+    },
+    rematch() {
+      if (!started || !opponent) return
+      const next = rematch(state)
       if (!next) return
       opponent.send({ type: 'state', state: next } satisfies Message)
       publish(next)

@@ -6,11 +6,13 @@ type Props = {
   /** Which mark this browser plays. */
   me: Mark
   onMove: (cell: number) => void
+  /** Shown once the game is over; the board resets for both players. */
+  onRematch: () => void
 }
 
 const label = (p: Player) => (p.emoji ? `${p.emoji} ${p.name}` : p.name)
 
-export default function Board({ state, me, onMove }: Props) {
+export default function Board({ state, me, onMove, onRematch }: Props) {
   const { board, turn, winner, draw, winningLine, players } = state
   const over = isOver(state)
 
@@ -53,6 +55,12 @@ export default function Board({ state, me, onMove }: Props) {
           )
         })}
       </div>
+
+      {over && (
+        <button type="button" className={styles.rematch} onClick={onRematch}>
+          Rematch
+        </button>
+      )}
     </section>
   )
 }

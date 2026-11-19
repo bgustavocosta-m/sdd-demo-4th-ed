@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMove, newGame, WINNING_LINES, type GameState, type Mark } from './ticTacToe'
+import { applyMove, newGame, rematch, WINNING_LINES, type GameState, type Mark } from './ticTacToe'
 
 const players = {
   X: { name: 'Ana', emoji: '🦊' },
@@ -122,5 +122,29 @@ describe('applyMove', () => {
     expect(drawn.draw).toBe(true)
     expect(drawn.winner).toBeNull()
     expect(drawn.winningLine).toBeNull()
+  })
+})
+
+describe('rematch', () => {
+  it('is rejected before the game is over', () => {
+    expect(rematch(newGame(players, 'X'))).toBeNull()
+    expect(rematch(play(newGame(players, 'X'), [4, 0]))).toBeNull()
+  })
+
+  it('after a win, resets the board and flips the first mover', () => {
+    // X: 0 1 2 — O: 3 4
+    const won = play(newGame(players, 'X'), [0, 3, 1, 4, 2])
+    expect(rematch(won)).toEqual(newGame(players, 'O'))
+  })
+
+  it('after a draw, resets the board and flips the first mover', () => {
+    const drawn = play(newGame(players, 'O'), [0, 1, 2, 4, 3, 5, 7, 6, 8])
+    expect(drawn.draw).toBe(true)
+    expect(rematch(drawn)).toEqual(newGame(players, 'X'))
+  })
+
+  it('keeps the players and their marks', () => {
+    const won = play(newGame(players, 'X'), [0, 3, 1, 4, 2])
+    expect(rematch(won)?.players).toEqual(players)
   })
 })
