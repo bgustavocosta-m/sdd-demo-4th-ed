@@ -13,6 +13,7 @@ export type GuestOptions = {
 
 export type GuestSession = {
   move: (cell: number) => void
+  rematch: () => void
   destroy: () => void
 }
 
@@ -42,6 +43,7 @@ export function joinRoom({ roomId, player, onState }: GuestOptions): GuestSessio
 
   return {
     move: (cell) => send({ type: 'move', cell }),
+    rematch: () => send({ type: 'rematch' }),
     destroy() {
       destroyed = true
       peer.destroy()
