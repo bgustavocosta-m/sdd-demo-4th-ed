@@ -1,0 +1,65 @@
+.game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.players {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.player {
+  padding: 4px 12px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.active {
+  border-color: var(--accent);
+  color: var(--text-h);
+}
+
+.status {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: min(100%, 360px);
+}
+
+.cell {
+  aspect-ratio: 1;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-h);
+  font-size: clamp(2rem, 12vw, 3.5rem);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cell:disabled {
+  cursor: default;
+}
+
+.cell:not(:disabled):hover,
+.cell:focus-visible {
+  border-color: var(--accent);
+}
+
+.win {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
