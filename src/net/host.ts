@@ -1,5 +1,5 @@
 import type { DataConnection } from 'peerjs'
-import { applyMove, newGame, type GameState, type Player } from '../game/ticTacToe'
+import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
 import { generateRoomId, toPeerId } from '../room/roomId'
 import { createPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
@@ -7,7 +7,10 @@ import { isMessage, type Message } from './protocol'
 /** What the host does with one message from the guest: the next state, and what to send back. */
 export type HostStep = { state: GameState; send: Message | null }
 
-/** Pure host-side rules: the guest is always O; invalid moves are ignored and the state re-sent. */
+/**
+ * Pure host-side rules: the guest is always O; invalid moves are ignored and the state re-sent.
+ * A rematch before game over is ignored.
+ */
 export function handleGuestMessage(state: GameState, msg: Message): HostStep {
   switch (msg.type) {
     case 'hello': {
@@ -17,6 +20,10 @@ export function handleGuestMessage(state: GameState, msg: Message): HostStep {
     case 'move': {
       const next = applyMove(state, 'O', msg.cell) ?? state
       return { state: next, send: { type: 'state', state: next } }
+    }
+    case 'rematch': {
+      const next = rematch(state)
+      return next ? { state: next, send: { type: 'state', state: next } } : { state, send: null }
     }
     default:
       return { state, send: null }
@@ -33,6 +40,7 @@ export type HostOptions = {
 
 export type HostSession = {
   makeMove: (cell: number) => void
+  rematch: () => void
   destroy: () => void
 }
 
@@ -83,6 +91,13 @@ export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession 
     makeMove(cell) {
       if (!started || !opponent) return
       const next = applyMove(state, 'X', cell)
+      if (!next) return
+      opponent.send({ type: 'state', state: next } satisfies Message)
+      publish(next)
+    },
+    rematch() {
+      if (!started || !opponent) return
+      const next = rematch(state)
       if (!next) return
       opponent.send({ type: 'state', state: next } satisfies Message)
       publish(next)

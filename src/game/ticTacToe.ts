@@ -40,6 +40,12 @@ export function isOver(state: GameState): boolean {
   return state.winner !== null || state.draw
 }
 
+/** A fresh board with the same players, the other mark moving first; `null` if the game isn't over yet. */
+export function rematch(state: GameState): GameState | null {
+  if (!isOver(state)) return null
+  return newGame(state.players, state.firstMover === 'X' ? 'O' : 'X')
+}
+
 /** Returns the next state, or `null` if the move is invalid (wrong turn, taken cell, out of range, game over). */
 export function applyMove(state: GameState, mark: Mark, cell: number): GameState | null {
   if (isOver(state) || mark !== state.turn) return null
