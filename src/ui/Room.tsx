@@ -3,11 +3,8 @@ import type { GameState, Player } from '../game/ticTacToe'
 import { joinRoom } from '../net/guest'
 import { hostRoom } from '../net/host'
 import Board from './Board'
+import ProfileForm from './ProfileForm'
 import styles from './Room.module.css'
-
-// Placeholder players until the profile form lands (#10).
-const HOST: Player = { name: 'Host', emoji: '' }
-const GUEST: Player = { name: 'Guest', emoji: '' }
 
 type Props =
   | { role: 'host'; onOpen: (roomId: string) => void; onBack: () => void }
@@ -18,7 +15,8 @@ type Props =
  * Owns the PeerJS session: created in one effect, destroyed in its cleanup (StrictMode-safe).
  */
 export default function Room(props: Props) {
-  const [started, setStarted] = useState(false)
+  /** Set when the form is submitted; that starts the session. */
+  const [player, setPlayer] = useState<Player | null>(null)
   const [roomId, setRoomId] = useState<string | null>(props.role === 'guest' ? props.roomId : null)
   const [state, setState] = useState<GameState | null>(null)
   const sessionRef = useRef<{ move: (cell: number) => void; rematch: () => void } | null>(null)
@@ -31,12 +29,12 @@ export default function Room(props: Props) {
   const guestRoomId = props.role === 'guest' ? props.roomId : null
 
   useEffect(() => {
-    if (!started) return
+    if (!player) return
     const session =
       guestRoomId === null
         ? (() => {
             const s = hostRoom({
-              player: HOST,
+              player,
               onOpen: (id) => {
                 setRoomId(id)
                 onOpenRef.current?.(id)
@@ -45,14 +43,14 @@ export default function Room(props: Props) {
             })
             return { move: s.makeMove, rematch: s.rematch, destroy: s.destroy }
           })()
-        : joinRoom({ roomId: guestRoomId, player: GUEST, onState: setState })
+        : joinRoom({ roomId: guestRoomId, player, onState: setState })
     sessionRef.current = session
     return () => {
       session.destroy()
       sessionRef.current = null
       setState(null)
     }
-  }, [started, guestRoomId])
+  }, [player, guestRoomId])
 
   if (state) {
     return (
@@ -70,16 +68,13 @@ export default function Room(props: Props) {
   if (props.role === 'guest') {
     return (
       <main className={styles.room}>
-        <h1>Join room {props.roomId}</h1>
-        <p>You'll play as {GUEST.name} (O).</p>
-        <button
-          type="button"
-          className={styles.primary}
-          disabled={started}
-          onClick={() => setStarted(true)}
-        >
-          {started ? 'Connecting…' : 'Join'}
-        </button>
+        <ProfileForm
+          title={`Join room ${props.roomId}`}
+          submitLabel="Join"
+          busyLabel="Connecting…"
+          busy={player !== null}
+          onSubmit={setPlayer}
+        />
       </main>
     )
   }
@@ -96,21 +91,14 @@ export default function Room(props: Props) {
 
   return (
     <main className={styles.room}>
-      <h1>Tic-Tac-Toe</h1>
-      <p>You'll play as {HOST.name} (X).</p>
-      <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.primary}
-          disabled={started}
-          onClick={() => setStarted(true)}
-        >
-          {started ? 'Creating…' : 'Create room'}
-        </button>
-        <button type="button" className={styles.secondary} onClick={props.onBack}>
-          Back
-        </button>
-      </div>
+      <ProfileForm
+        title="Tic-Tac-Toe"
+        submitLabel="Create room"
+        busyLabel="Creating…"
+        busy={player !== null}
+        onSubmit={setPlayer}
+        onBack={props.onBack}
+      />
     </main>
   )
 }

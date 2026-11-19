@@ -1,11 +1,18 @@
 import type { DataConnection } from 'peerjs'
 import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
+import { isEmoji, validateName } from '../profile/profile'
 import { generateRoomId, toPeerId } from '../room/roomId'
 import { createPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
 
 /** What the host does with one message from the guest: the next state, and what to send back. */
 export type HostStep = { state: GameState; send: Message | null }
+
+/** The guest's player as the host will show it: an invalid name or emoji falls back to a default. */
+const guestPlayer = (name: string, emoji: string): Player => ({
+  name: validateName(name) ?? 'Guest',
+  emoji: isEmoji(emoji) ? emoji : '',
+})
 
 /**
  * Pure host-side rules: the guest is always O; invalid moves are ignored and the state re-sent.
@@ -14,7 +21,7 @@ export type HostStep = { state: GameState; send: Message | null }
 export function handleGuestMessage(state: GameState, msg: Message): HostStep {
   switch (msg.type) {
     case 'hello': {
-      const next = { ...state, players: { ...state.players, O: { name: msg.name, emoji: msg.emoji } } }
+      const next = { ...state, players: { ...state.players, O: guestPlayer(msg.name, msg.emoji) } }
       return { state: next, send: { type: 'state', state: next } }
     }
     case 'move': {
