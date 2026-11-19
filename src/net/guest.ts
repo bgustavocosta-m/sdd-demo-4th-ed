@@ -1,6 +1,7 @@
 import type { DataConnection } from 'peerjs'
 import type { GameState, Player } from '../game/ticTacToe'
 import { toPeerId } from '../room/roomId'
+import { startHeartbeat } from './heartbeat'
 import { CONNECT_OPTIONS, createPeer as createRealPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
 
@@ -17,6 +18,8 @@ export type GuestOptions = {
   onState: (state: GameState) => void
   /** Called at most once, before any `state`; the Peer is already destroyed. */
   onFail: (reason: JoinFailure) => void
+  /** The host went away (closed, or 6 s without a ping) after letting us in. */
+  onLeft: () => void
 }
 
 export type GuestSession = {
@@ -27,20 +30,24 @@ export type GuestSession = {
 
 /** The guest runs no rules: it sends intents and renders the host's latest `state`. */
 export function joinRoom(
-  { roomId, player, onState, onFail }: GuestOptions,
+  { roomId, player, onState, onFail, onLeft }: GuestOptions,
   createPeer = createRealPeer,
 ): GuestSession {
   const peer = createPeer()
   let destroyed = false
-  let joined = false
   let conn: DataConnection | null = null
+  let stopHeartbeat = () => {}
+  /** We've had a `state`, so we're in the room. */
+  let joined = false
 
   const destroy = () => {
     destroyed = true
     clearTimeout(timeout)
+    stopHeartbeat()
     peer.destroy()
   }
 
+  /** Before the first `state` only: after that, losing the host is "Opponent left" (#12). */
   const fail = (reason: JoinFailure) => {
     if (destroyed || joined) return
     destroy()
@@ -57,7 +64,13 @@ export function joinRoom(
     if (destroyed) return
     const c = peer.connect(toPeerId(roomId), CONNECT_OPTIONS)
     conn = c
-    c.on('open', () => send({ type: 'hello', name: player.name, emoji: player.emoji }))
+    c.on('open', () => {
+      send({ type: 'hello', name: player.name, emoji: player.emoji })
+      stopHeartbeat = startHeartbeat(c, () => {
+        c.close()
+        if (!destroyed && joined) onLeft()
+      })
+    })
     c.on('data', (raw) => {
       if (destroyed || !isMessage(raw)) return
       if (raw.type === 'room-full') fail('full')

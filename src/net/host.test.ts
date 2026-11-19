@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMove, isOver, newGame, type GameState } from '../game/ticTacToe'
 import { toPeerId } from '../room/roomId'
 import { FakeConn, fakePeerFactory } from './fakePeer'
@@ -102,12 +102,17 @@ describe('handleGuestMessage rematch', () => {
 describe('hostRoom', () => {
   const player = { name: 'Al', emoji: '🦊' }
 
+  // The heartbeat runs on timers.
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
   function setup() {
     const { peers, createPeer } = fakePeerFactory()
     const onOpen = vi.fn()
     const onState = vi.fn()
     const onFail = vi.fn()
-    const session = hostRoom({ player, onOpen, onState, onFail }, createPeer)
+    const onLeft = vi.fn()
+    const session = hostRoom({ player, onOpen, onState, onFail, onLeft }, createPeer)
     return { peers, session, onOpen, onState, onFail }
   }
 
@@ -179,5 +184,21 @@ describe('hostRoom', () => {
     expect(last.board[4]).toBe('X')
     expect(last.board[0]).toBe('O')
     expect(guest.closedWith).toBeNull()
+  })
+
+  it('tells a visitor who arrives after the guest left that the room is full', () => {
+    const { peers } = setup()
+    const peer = peers[0]
+    const guest = new FakeConn()
+    peer.emit('connection', guest)
+    guest.fireOpen()
+    guest.emit('data', { type: 'hello', name: 'Bo', emoji: '🐼' })
+    guest.emit('close')
+
+    const late = new FakeConn()
+    peer.emit('connection', late)
+    late.fireOpen()
+    expect(late.sent).toEqual([{ type: 'room-full' }])
+    expect(late.closedWith).toEqual({ flush: true })
   })
 })

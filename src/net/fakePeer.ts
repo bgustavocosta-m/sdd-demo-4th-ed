@@ -14,6 +14,11 @@ class Emitter {
     return this
   }
 
+  off(event: string, handler: Handler) {
+    this.handlers.set(event, (this.handlers.get(event) ?? []).filter((h) => h !== handler))
+    return this
+  }
+
   emit(event: string, ...args: unknown[]) {
     for (const h of this.handlers.get(event) ?? []) h(...args)
   }

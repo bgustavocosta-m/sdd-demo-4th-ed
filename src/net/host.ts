@@ -2,6 +2,7 @@ import type { DataConnection, Peer } from 'peerjs'
 import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
 import { isEmoji, validateName } from '../profile/profile'
 import { generateRoomId, toPeerId } from '../room/roomId'
+import { startHeartbeat } from './heartbeat'
 import { createPeer as createRealPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
 
@@ -45,6 +46,8 @@ export type HostOptions = {
   onState: (state: GameState) => void
   /** Every try got `unavailable-id`: "Couldn't create room, try again". */
   onFail: () => void
+  /** The guest left after joining: the room is over (no return to waiting). */
+  onLeft: () => void
 }
 
 export type HostSession = {
@@ -58,14 +61,17 @@ export const CREATE_TRIES = 3
 
 /** Host-authoritative: owns the `GameState`, applies both players' moves, sends full snapshots. */
 export function hostRoom(
-  { player, onOpen, onState, onFail }: HostOptions,
+  { player, onOpen, onState, onFail, onLeft }: HostOptions,
   createPeer = createRealPeer,
 ): HostSession {
   let peer: Peer
   let tries = 0
   let destroyed = false
   let opponent: DataConnection | null = null
+  let stopHeartbeat = () => {}
   let started = false
+  /** The guest left mid-game; nobody else gets in. */
+  let ended = false
   let state = newGame({ X: player, O: { name: 'Guest', emoji: '' } }, 'X')
 
   const publish = (next: GameState) => {
@@ -88,26 +94,30 @@ export function hostRoom(
     p.on('connection', (conn) => {
       if (!live()) return
       conn.on('open', () => {
-        if (opponent) {
+        if (opponent || ended) {
           // A third visitor: flush so `room-full` arrives before the close (#2).
           conn.send({ type: 'room-full' } satisfies Message)
           conn.close({ flush: true })
           return
         }
         opponent = conn
+        stopHeartbeat = startHeartbeat(conn, () => {
+          opponent = null
+          conn.close()
+          if (destroyed) return
+          // A guest who leaves before saying hello frees the room for the next one.
+          if (!started) return
+          ended = true
+          onLeft()
+        })
       })
       conn.on('data', (raw) => {
-        if (conn !== opponent || !isMessage(raw)) return
+        if (conn !== opponent || !isMessage(raw) || raw.type === 'ping') return
         if (!started && raw.type !== 'hello') return
         if (raw.type === 'hello') started = true
         const step = handleGuestMessage(state, raw)
         if (step.send) conn.send(step.send)
         publish(step.state)
-      })
-      conn.on('close', () => {
-        // A guest who leaves before saying hello frees the room for the next one.
-        // Leaving mid-game ("Opponent left") comes in #12.
-        if (conn === opponent && !started) opponent = null
       })
     })
 
@@ -142,6 +152,7 @@ export function hostRoom(
     },
     destroy() {
       destroyed = true
+      stopHeartbeat()
       peer.destroy()
     },
   }

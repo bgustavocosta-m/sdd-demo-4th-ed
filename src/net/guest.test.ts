@@ -10,14 +10,15 @@ function setup() {
   const { peers, createPeer } = fakePeerFactory()
   const onState = vi.fn()
   const onFail = vi.fn()
-  const session = joinRoom({ roomId: 'abc123', player, onState, onFail }, createPeer)
+  const onLeft = vi.fn()
+  const session = joinRoom({ roomId: 'abc123', player, onState, onFail, onLeft }, createPeer)
   const peer = peers[0]
   /** The broker accepted us; the guest dials the host. */
   const dial = () => {
     peer.emit('open', 'guest-id')
     return peer.conns[0]
   }
-  return { peer, session, onState, onFail, dial }
+  return { peer, session, onState, onFail, onLeft, dial }
 }
 
 describe('joinRoom failures', () => {
@@ -73,8 +74,17 @@ describe('joinRoom failures', () => {
     vi.advanceTimersByTime(JOIN_TIMEOUT_MS * 2)
     conn.emit('close')
     expect(onState).toHaveBeenCalledWith(state)
-    expect(onFail).not.toHaveBeenCalledWith('not-found')
-    expect(onFail).not.toHaveBeenCalledWith('full')
+    expect(onFail).not.toHaveBeenCalled()
+  })
+
+  it('treats a close after the first state as the host leaving, not Room full', () => {
+    const { onFail, onLeft, dial } = setup()
+    const conn = dial()
+    conn.fireOpen()
+    conn.emit('data', { type: 'state', state })
+    conn.emit('close')
+    expect(onLeft).toHaveBeenCalledOnce()
+    expect(onFail).not.toHaveBeenCalled()
   })
 
   it('reports nothing after destroy()', () => {

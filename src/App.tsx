@@ -31,9 +31,7 @@ export default function App() {
   }
 
   // Every tab that isn't hosting this room is a guest (#4).
-  if (route.name === 'room') {
-    return <Room key={route.id} role="guest" roomId={route.id} onBack={() => navigate('#/')} />
-  }
+  if (route.name === 'room') return <Room key={route.id} role="guest" roomId={route.id} />
 
   return <Home onPickTicTacToe={() => setHosting({ roomId: null })} />
 }
