@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMove, isOver, newGame, type GameState } from '../game/ticTacToe'
-import { handleGuestMessage } from './host'
+import { toPeerId } from '../room/roomId'
+import { FakeConn, fakePeerFactory } from './fakePeer'
+import { CREATE_TRIES, handleGuestMessage, hostRoom } from './host'
 
 /** Plays the cells in order, from whoever's turn it is. */
 const play = (state: GameState, cells: number[]) =>
@@ -94,5 +96,109 @@ describe('handleGuestMessage rematch', () => {
       firstMovers.push(state.firstMover)
     }
     expect(firstMovers).toEqual(['X', 'O', 'X', 'O', 'X'])
+  })
+})
+
+describe('hostRoom', () => {
+  const player = { name: 'Al', emoji: '🦊' }
+
+  // The heartbeat runs on timers.
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  function setup() {
+    const { peers, createPeer } = fakePeerFactory()
+    const onOpen = vi.fn()
+    const onState = vi.fn()
+    const onFail = vi.fn()
+    const onLeft = vi.fn()
+    const session = hostRoom({ player, onOpen, onState, onFail, onLeft }, createPeer)
+    return { peers, session, onOpen, onState, onFail }
+  }
+
+  it('makes up to 3 tries in total', () => {
+    expect(CREATE_TRIES).toBe(3)
+  })
+
+  it('retries with a new room ID and a new Peer on unavailable-id', () => {
+    const { peers, onOpen, onFail } = setup()
+    peers[0].error('unavailable-id')
+    expect(peers).toHaveLength(2)
+    expect(peers[1].id).not.toBe(peers[0].id)
+    expect(peers[0].destroyed).toBe(true)
+
+    peers[1].emit('open', peers[1].id)
+    expect(onOpen).toHaveBeenCalledOnce()
+    expect(toPeerId(onOpen.mock.calls[0][0])).toBe(peers[1].id)
+    expect(onFail).not.toHaveBeenCalled()
+  })
+
+  it('gives up after 3 taken IDs', () => {
+    const { peers, onOpen, onFail } = setup()
+    for (let i = 0; i < CREATE_TRIES; i++) peers[i].error('unavailable-id')
+    expect(peers).toHaveLength(CREATE_TRIES)
+    expect(onFail).toHaveBeenCalledOnce()
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(peers.every((p) => p.destroyed)).toBe(true)
+  })
+
+  it('ignores events from a Peer it has given up on', () => {
+    const { peers, onOpen } = setup()
+    peers[0].error('unavailable-id')
+    peers[0].emit('open', peers[0].id)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('destroy() destroys the current Peer and stops retrying', () => {
+    const { peers, session, onFail } = setup()
+    peers[0].error('unavailable-id')
+    session.destroy()
+    expect(peers[1].destroyed).toBe(true)
+    peers[1].error('unavailable-id')
+    expect(peers).toHaveLength(2)
+    expect(onFail).not.toHaveBeenCalled()
+  })
+
+  it('tells a third visitor the room is full, flushing before closing, and keeps the game going', () => {
+    const { peers, session, onState } = setup()
+    const peer = peers[0]
+    peer.emit('open', peer.id)
+
+    const guest = new FakeConn()
+    peer.emit('connection', guest)
+    guest.fireOpen()
+    guest.emit('data', { type: 'hello', name: 'Bo', emoji: '🐼' })
+
+    const third = new FakeConn()
+    peer.emit('connection', third)
+    third.fireOpen()
+    expect(third.sent).toEqual([{ type: 'room-full' }])
+    expect(third.closedWith).toEqual({ flush: true })
+
+    // The third visitor's messages are ignored; the game between the first two carries on.
+    third.emit('data', { type: 'move', cell: 0 })
+    third.emit('close')
+    session.makeMove(4)
+    guest.emit('data', { type: 'move', cell: 0 })
+    const last = onState.mock.calls.at(-1)![0] as GameState
+    expect(last.board[4]).toBe('X')
+    expect(last.board[0]).toBe('O')
+    expect(guest.closedWith).toBeNull()
+  })
+
+  it('tells a visitor who arrives after the guest left that the room is full', () => {
+    const { peers } = setup()
+    const peer = peers[0]
+    const guest = new FakeConn()
+    peer.emit('connection', guest)
+    guest.fireOpen()
+    guest.emit('data', { type: 'hello', name: 'Bo', emoji: '🐼' })
+    guest.emit('close')
+
+    const late = new FakeConn()
+    peer.emit('connection', late)
+    late.fireOpen()
+    expect(late.sent).toEqual([{ type: 'room-full' }])
+    expect(late.closedWith).toEqual({ flush: true })
   })
 })

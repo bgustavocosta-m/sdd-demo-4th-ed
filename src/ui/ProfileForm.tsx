@@ -11,10 +11,12 @@ type Props = {
   busy: boolean
   onSubmit: (profile: Profile) => void
   onBack?: () => void
+  /** Shown above the buttons, e.g. after a failed create. */
+  error?: string
 }
 
 /** Name (1–16 chars, trimmed) and one of 12 animal emojis; prefilled from the last visit. */
-export default function ProfileForm({ title, submitLabel, busyLabel, busy, onSubmit, onBack }: Props) {
+export default function ProfileForm({ title, submitLabel, busyLabel, busy, onSubmit, onBack, error }: Props) {
   const [initial] = useState(() => loadProfile() ?? { name: '', emoji: randomEmoji() })
   const [name, setName] = useState(initial.name)
   const [emoji, setEmoji] = useState(initial.emoji)
@@ -73,6 +75,12 @@ export default function ProfileForm({ title, submitLabel, busyLabel, busy, onSub
           ))}
         </div>
       </fieldset>
+
+      {error && (
+        <p className={`${styles.error} ${styles.alert}`} role="alert">
+          {error}
+        </p>
+      )}
 
       <div className={styles.actions}>
         <button type="submit" className={styles.primary} disabled={busy || valid === null}>
