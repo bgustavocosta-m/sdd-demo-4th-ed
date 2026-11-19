@@ -12,6 +12,21 @@ describe('handleGuestMessage', () => {
     expect(send).toEqual({ type: 'state', state })
   })
 
+  it('trims the guest name and keeps a duplicate emoji', () => {
+    const fox = newGame({ X: { name: 'Ana', emoji: '🦊' }, O: { name: 'Guest', emoji: '' } }, 'X')
+    const { state } = handleGuestMessage(fox, { type: 'hello', name: '  Rui ', emoji: '🦊' })
+    expect(state.players.O).toEqual({ name: 'Rui', emoji: '🦊' })
+  })
+
+  it.each([
+    ['an empty name', '   ', '🐸', { name: 'Guest', emoji: '🐸' }],
+    ['a name over 16 chars', 'x'.repeat(17), '🐸', { name: 'Guest', emoji: '🐸' }],
+    ['an emoji outside the grid', 'Rui', '🍕', { name: 'Rui', emoji: '' }],
+  ])('falls back to defaults for %s', (_, name, emoji, player) => {
+    const { state } = handleGuestMessage(start, { type: 'hello', name, emoji })
+    expect(state.players.O).toEqual(player)
+  })
+
   it('applies a legal guest move as O and sends the new state', () => {
     const oTurn = applyMove(start, 'X', 4)!
     const { state, send } = handleGuestMessage(oTurn, { type: 'move', cell: 0 })

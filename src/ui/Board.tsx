@@ -15,9 +15,9 @@ export default function Board({ state, me, onMove }: Props) {
   const over = isOver(state)
 
   let status: string
-  if (winner) status = winner === me ? 'You win!' : `${label(players[winner])} wins`
+  if (winner) status = `${label(players[winner])} wins!`
   else if (draw) status = "It's a draw"
-  else status = turn === me ? `Your turn (${turn})` : `${label(players[turn])}'s turn (${turn})`
+  else status = `${label(players[turn])}'s turn${turn === me ? ' — your move' : ''}`
 
   return (
     <section className={styles.game}>
