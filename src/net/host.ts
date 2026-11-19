@@ -1,8 +1,8 @@
-import type { DataConnection } from 'peerjs'
+import type { DataConnection, Peer } from 'peerjs'
 import { applyMove, newGame, rematch, type GameState, type Player } from '../game/ticTacToe'
 import { isEmoji, validateName } from '../profile/profile'
 import { generateRoomId, toPeerId } from '../room/roomId'
-import { createPeer } from './peerConfig'
+import { createPeer as createRealPeer } from './peerConfig'
 import { isMessage, type Message } from './protocol'
 
 /** What the host does with one message from the guest: the next state, and what to send back. */
@@ -43,6 +43,8 @@ export type HostOptions = {
   onOpen: (roomId: string) => void
   /** A guest said hello, or the game changed. */
   onState: (state: GameState) => void
+  /** Every try got `unavailable-id`: "Couldn't create room, try again". */
+  onFail: () => void
 }
 
 export type HostSession = {
@@ -51,10 +53,16 @@ export type HostSession = {
   destroy: () => void
 }
 
+/** Room IDs tried before giving up (#4). A taken ID destroys the Peer, so each try is a new Peer (#2). */
+export const CREATE_TRIES = 3
+
 /** Host-authoritative: owns the `GameState`, applies both players' moves, sends full snapshots. */
-export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession {
-  const roomId = generateRoomId()
-  const peer = createPeer(toPeerId(roomId))
+export function hostRoom(
+  { player, onOpen, onState, onFail }: HostOptions,
+  createPeer = createRealPeer,
+): HostSession {
+  let peer: Peer
+  let tries = 0
   let destroyed = false
   let opponent: DataConnection | null = null
   let started = false
@@ -65,34 +73,57 @@ export function hostRoom({ player, onOpen, onState }: HostOptions): HostSession 
     if (!destroyed) onState(state)
   }
 
-  peer.on('open', () => {
-    if (!destroyed) onOpen(roomId)
-  })
+  const start = () => {
+    tries++
+    const roomId = generateRoomId()
+    const p = createPeer(toPeerId(roomId))
+    peer = p
+    /** Events from a Peer we've replaced or destroyed are ignored. */
+    const live = () => !destroyed && p === peer
 
-  peer.on('connection', (conn) => {
-    conn.on('open', () => {
-      if (opponent) {
-        conn.close() // A third visitor. "Room full" comes in #13.
+    p.on('open', () => {
+      if (live()) onOpen(roomId)
+    })
+
+    p.on('connection', (conn) => {
+      if (!live()) return
+      conn.on('open', () => {
+        if (opponent) {
+          // A third visitor: flush so `room-full` arrives before the close (#2).
+          conn.send({ type: 'room-full' } satisfies Message)
+          conn.close({ flush: true })
+          return
+        }
+        opponent = conn
+      })
+      conn.on('data', (raw) => {
+        if (conn !== opponent || !isMessage(raw)) return
+        if (!started && raw.type !== 'hello') return
+        if (raw.type === 'hello') started = true
+        const step = handleGuestMessage(state, raw)
+        if (step.send) conn.send(step.send)
+        publish(step.state)
+      })
+      conn.on('close', () => {
+        // A guest who leaves before saying hello frees the room for the next one.
+        // Leaving mid-game ("Opponent left") comes in #12.
+        if (conn === opponent && !started) opponent = null
+      })
+    })
+
+    p.on('error', (err) => {
+      if (!live()) return
+      if (err.type !== 'unavailable-id') {
+        console.error('[host]', err.type, err)
         return
       }
-      opponent = conn
+      p.destroy()
+      if (tries < CREATE_TRIES) start()
+      else onFail()
     })
-    conn.on('data', (raw) => {
-      if (conn !== opponent || !isMessage(raw)) return
-      if (!started && raw.type !== 'hello') return
-      if (raw.type === 'hello') started = true
-      const step = handleGuestMessage(state, raw)
-      if (step.send) conn.send(step.send)
-      publish(step.state)
-    })
-    conn.on('close', () => {
-      // A guest who leaves before saying hello frees the room for the next one.
-      // Leaving mid-game ("Opponent left") comes in #12.
-      if (conn === opponent && !started) opponent = null
-    })
-  })
+  }
 
-  peer.on('error', (err) => console.error('[host]', err.type, err))
+  start()
 
   return {
     makeMove(cell) {

@@ -53,6 +53,11 @@
   color: #d33;
 }
 
+.alert {
+  margin: 0;
+  text-align: center;
+}
+
 .emojis {
   margin: 0;
   padding: 0;

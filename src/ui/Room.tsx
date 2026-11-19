@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GameState, Player } from '../game/ticTacToe'
-import { joinRoom } from '../net/guest'
+import { joinRoom, type JoinFailure } from '../net/guest'
 import { hostRoom } from '../net/host'
+import { isValidRoomId } from '../room/roomId'
 import Board from './Board'
 import ProfileForm from './ProfileForm'
 import styles from './Room.module.css'
 
 type Props =
   | { role: 'host'; onOpen: (roomId: string) => void; onBack: () => void }
-  | { role: 'guest'; roomId: string }
+  | { role: 'guest'; roomId: string; onBack: () => void }
 
 /**
- * Host: form → creating → waiting → playing.  Guest: form → connecting → playing.
+ * Host: form → creating → waiting → playing (or back to the form if no ID could be taken).
+ * Guest: form → connecting → playing, or Room not found / Room full.
  * Owns the PeerJS session: created in one effect, destroyed in its cleanup (StrictMode-safe).
  */
 export default function Room(props: Props) {
@@ -19,6 +21,8 @@ export default function Room(props: Props) {
   const [player, setPlayer] = useState<Player | null>(null)
   const [roomId, setRoomId] = useState<string | null>(props.role === 'guest' ? props.roomId : null)
   const [state, setState] = useState<GameState | null>(null)
+  const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null)
+  const [createFailed, setCreateFailed] = useState(false)
   const sessionRef = useRef<{ move: (cell: number) => void; rematch: () => void } | null>(null)
 
   const onOpenRef = useRef(props.role === 'host' ? props.onOpen : undefined)
@@ -27,9 +31,11 @@ export default function Room(props: Props) {
   })
 
   const guestRoomId = props.role === 'guest' ? props.roomId : null
+  // A malformed link never reaches the network (#4).
+  const badLink = guestRoomId !== null && !isValidRoomId(guestRoomId)
 
   useEffect(() => {
-    if (!player) return
+    if (!player || badLink) return
     const session =
       guestRoomId === null
         ? (() => {
@@ -40,17 +46,38 @@ export default function Room(props: Props) {
                 onOpenRef.current?.(id)
               },
               onState: setState,
+              onFail: () => {
+                setCreateFailed(true)
+                setPlayer(null) // back to the form, ready to try again
+              },
             })
             return { move: s.makeMove, rematch: s.rematch, destroy: s.destroy }
           })()
-        : joinRoom({ roomId: guestRoomId, player, onState: setState })
+        : joinRoom({ roomId: guestRoomId, player, onState: setState, onFail: setJoinFailure })
     sessionRef.current = session
     return () => {
       session.destroy()
       sessionRef.current = null
       setState(null)
     }
-  }, [player, guestRoomId])
+  }, [player, guestRoomId, badLink])
+
+  if (props.role === 'guest' && (badLink || joinFailure)) {
+    const full = !badLink && joinFailure === 'full'
+    return (
+      <main className={styles.room}>
+        <h1>{full ? 'Room full' : 'Room not found'}</h1>
+        <p className={styles.waiting}>
+          {full
+            ? 'This room already has two players.'
+            : 'This link doesn’t match a room that’s open right now.'}
+        </p>
+        <button type="button" className={styles.primary} onClick={props.onBack}>
+          Back to home
+        </button>
+      </main>
+    )
+  }
 
   if (state) {
     return (
@@ -96,8 +123,12 @@ export default function Room(props: Props) {
         submitLabel="Create room"
         busyLabel="Creating…"
         busy={player !== null}
-        onSubmit={setPlayer}
+        onSubmit={(p) => {
+          setCreateFailed(false)
+          setPlayer(p)
+        }}
         onBack={props.onBack}
+        error={createFailed ? 'Couldn’t create room, try again' : undefined}
       />
     </main>
   )
